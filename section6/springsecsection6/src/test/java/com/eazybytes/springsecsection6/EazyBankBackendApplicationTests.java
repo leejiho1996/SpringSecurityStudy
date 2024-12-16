@@ -1,4 +1,4 @@
-package com.eazybytes.springsecsection1;
+package com.eazybytes.springsecsection6;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
