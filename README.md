@@ -1,2 +1,1 @@
-"SpringSecurityStudy" 
-"# SpringSecurityStudy" 
+"For SpringSecurityStudy" 
