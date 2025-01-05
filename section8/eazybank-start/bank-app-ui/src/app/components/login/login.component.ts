@@ -3,7 +3,7 @@ import { User } from "src/app/model/user.model";
 import { NgForm } from '@angular/forms';
 import { LoginService } from 'src/app/services/login/login.service';
 import { Router } from '@angular/router';
-
+import {getCookie} from 'typescript-cookie';
 
 @Component({
   selector: 'app-login',

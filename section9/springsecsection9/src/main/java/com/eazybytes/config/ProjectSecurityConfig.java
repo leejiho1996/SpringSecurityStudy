@@ -47,8 +47,17 @@ public class ProjectSecurityConfig {
 //                        .invalidSessionUrl("/invalidSession")
 //                        .maximumSessions(3).maxSessionsPreventsLogin(true))
                 .requiresChannel(rcc -> rcc.anyRequest().requiresInsecure()) // Only Accept HTTP
-                .authorizeHttpRequests((requests) -> requests
-                .requestMatchers("/myAccount", "/myBalance", "/myLoans", "/myCards", "/user").authenticated()
+                .authorizeHttpRequests(requests -> requests
+//                .requestMatchers("/myAccount").hasAuthority("VIEWACCOUNT")
+//                .requestMatchers("/myBalance").hasAnyAuthority("VIEWBALANCE", "VIEWACCOUNT")
+//                .requestMatchers("/myLoans").hasAuthority("VIEWLOANS")
+//                .requestMatchers("/myCards").hasAuthority("VIEWCARDS")
+                // ROLE_ 접두사를 안붙혀도 됨
+                .requestMatchers("/myAccount").hasRole("USER")
+                .requestMatchers("/myBalance").hasAnyRole("USER", "ADMIN")
+                .requestMatchers("/myLoans").hasRole("USER")
+                .requestMatchers("/myCards").hasRole("USER")
+                .requestMatchers("/user").authenticated()
                 .requestMatchers("/contact", "/notices", "/error", "/register", "/invalidSession").permitAll());
         http.formLogin(withDefaults());
         // EntryPoint 설정

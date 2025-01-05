@@ -4,7 +4,6 @@ import com.eazybytes.exceptionhandling.CustomAccessDeniedHandler;
 import com.eazybytes.exceptionhandling.CustomBasicAuthenticationEntryPoint;
 import com.eazybytes.filter.CsrfCookieFilter;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -16,81 +15,69 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.password.HaveIBeenPwnedRestApiPasswordChecker;
 import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
-import org.springframework.security.web.csrf.*;
-import org.springframework.util.StringUtils;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 
 import java.util.Collections;
-import java.util.function.Supplier;
 
 import static org.springframework.security.config.Customizer.withDefaults;
 
 @Configuration
-@Profile("!prod")
-public class ProjectSecurityConfig {
+@Profile("prod")
+public class ProjectSecurityProdConfig {
     @Bean
     SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
         CsrfTokenRequestAttributeHandler csrfTokenRequestAttributeHandler = new CsrfTokenRequestAttributeHandler();
-        csrfTokenRequestAttributeHandler.setCsrfRequestAttributeName("potato");
 
-        http.cors(corsConfig  -> corsConfig.configurationSource(new CorsConfigurationSourceImpl()))
+        http.cors(corsConfig  -> corsConfig.configurationSource(new CorsConfigurationSource() {
+                    @Override
+                    public CorsConfiguration getCorsConfiguration(HttpServletRequest request) {
+                        CorsConfiguration config = new CorsConfiguration();
+                        config.setAllowedOrigins(Collections.singletonList("https://localhost:4200"));
+                        config.setAllowedMethods(Collections.singletonList("*"));
+                        config.setAllowCredentials(true); // user 인증 정보나 쿠키 정보 수락
+                        config.setAllowedHeaders(Collections.singletonList("*")); // 모든 종류의 헤더 수락 가능
+                        config.setMaxAge(3600L); //3600초 동안 캐싱
+                        return config;
+                    }
+                }))
+                .securityContext(contextConfig -> contextConfig.requireExplicitSave(true))
+                .sessionManagement(smc -> smc.sessionCreationPolicy(SessionCreationPolicy.ALWAYS)
+                        .sessionFixation(sfc -> sfc.changeSessionId())
+                        .invalidSessionUrl("/invalidSession") // 세션 만료, 유효하지 않은 세션일때 해당 페이지로 리다이렉트
+                        .maximumSessions(3).maxSessionsPreventsLogin(true).expiredUrl("/sessionExpired")) // 세션갯수 제한, PreventLogin을 true로 하면 기본 세션 유지 두번째로 로그인하는 세션 무시
+                .requiresChannel(rcc -> rcc.anyRequest().requiresSecure()) // Only Accept HTTPS
                 .csrf(csrfConfig -> csrfConfig.csrfTokenRequestHandler(csrfTokenRequestAttributeHandler)
+                        // 해당 URI는 POST 더라도 CSRF 무시
                         .ignoringRequestMatchers("/contact", "/register")
                         // withHttpOnlyFalse를 설정하지 않으면 JS가 쿠키 내용을 읽을 수 없다.
                         .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()))
                 // BasicAuthenticationFilter가 실행 된 후 CsrfCookieFilter 실행
                 .addFilterAfter(new CsrfCookieFilter(), BasicAuthenticationFilter.class)
-                .securityContext(contextConfig -> contextConfig.requireExplicitSave(false))
-                .sessionManagement(smc -> smc.sessionCreationPolicy(SessionCreationPolicy.ALWAYS))
-//                        .sessionFixation(sfc -> sfc.changeSessionId())
-//                        .invalidSessionUrl("/invalidSession")
-//                        .maximumSessions(3).maxSessionsPreventsLogin(true))
-                .requiresChannel(rcc -> rcc.anyRequest().requiresInsecure()) // Only Accept HTTP
                 .authorizeHttpRequests((requests) -> requests
-                .requestMatchers("/myAccount", "/myBalance", "/myLoans", "/myCards", "/user").authenticated()
+                        .requestMatchers("/myAccount").hasAuthority("VIEWACCOUNT")
+//                .requestMatchers("/myBalance").hasAnyAuthority("VIEWBALANCE", "VIEWACCOUNT")
+//                .requestMatchers("/myLoans").hasAuthority("VIEWLOANS")
+//                .requestMatchers("/myCards").hasAuthority("VIEWCARDS")
+                        // ROLE_ 접두사를 안붙혀도 됨
+                        .requestMatchers("/myAccount").hasRole("USER")
+                        .requestMatchers("/myBalance").hasAnyRole("USER", "ADMIN")
+                        .requestMatchers("/myLoans").hasRole("USER")
+                        .requestMatchers("/myCards").hasRole("USER")
+                        .requestMatchers("/user").authenticated()
                 .requestMatchers("/contact", "/notices", "/error", "/register", "/invalidSession").permitAll());
         http.formLogin(withDefaults());
         // EntryPoint 설정
         http.httpBasic(hbc -> hbc.authenticationEntryPoint(new CustomBasicAuthenticationEntryPoint()));
+        // 전역 EntryPoint 설정 (로그인 흐름 httpBasic 이외에도 다른 곳에서 발생할 수 있는 오류 처리)
+        // http.exceptionHandling(ehc -> ehc.authenticationEntryPoint(new CustomBasicAuthenticationEntryPoint()));
+
+        // AccessDeniedHandler 설정. 자체 UI를 제공하는 상황에서는 .accessDeniedPage("/page") 처럼 설정
         http.exceptionHandling(ehc -> ehc.accessDeniedHandler(new CustomAccessDeniedHandler()));
         return http.build();
     }
-
-//    final class SpaCsrfTokenRequestHandler implements CsrfTokenRequestHandler {
-//        private final CsrfTokenRequestHandler plain = new CsrfTokenRequestAttributeHandler();
-//        private final CsrfTokenRequestHandler xor = new XorCsrfTokenRequestAttributeHandler();
-//
-//        @Override
-//        public void handle(HttpServletRequest request, HttpServletResponse response, Supplier<CsrfToken> csrfToken) {
-//            /*
-//             * Always use XorCsrfTokenRequestAttributeHandler to provide BREACH protection of
-//             * the CsrfToken when it is rendered in the response body.
-//             */
-//            this.xor.handle(request, response, csrfToken);
-//            /*
-//             * Render the token value to a cookie by causing the deferred token to be loaded.
-//             */
-//            csrfToken.get();
-//        }
-//
-//        @Override
-//        public String resolveCsrfTokenValue(HttpServletRequest request, CsrfToken csrfToken) {
-//            String headerValue = request.getHeader(csrfToken.getHeaderName());
-//            /*
-//             * If the request contains a request header, use CsrfTokenRequestAttributeHandler
-//             * to resolve the CsrfToken. This applies when a single-page application includes
-//             * the header value automatically, which was obtained via a cookie containing the
-//             * raw CsrfToken.
-//             *
-//             * In all other cases (e.g. if the request contains a request parameter), use
-//             * XorCsrfTokenRequestAttributeHandler to resolve the CsrfToken. This applies
-//             * when a server-side rendered form includes the _csrf request parameter as a
-//             * hidden input.
-//             */
-//            return (StringUtils.hasText(headerValue) ? this.plain : this.xor).resolveCsrfTokenValue(request, csrfToken);
-//        }
-//    }
 
     @Bean
     public PasswordEncoder passwordEncoder() {

@@ -2,16 +2,21 @@ package com.eazybytes.config;
 
 import com.eazybytes.exceptionhandling.CustomAccessDeniedHandler;
 import com.eazybytes.exceptionhandling.CustomBasicAuthenticationEntryPoint;
+import com.eazybytes.filter.CsrfCookieFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.security.authentication.password.CompromisedPasswordChecker;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.password.HaveIBeenPwnedRestApiPasswordChecker;
+import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 
@@ -24,6 +29,8 @@ import static org.springframework.security.config.Customizer.withDefaults;
 public class ProjectSecurityProdConfig {
     @Bean
     SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
+        CsrfTokenRequestAttributeHandler csrfTokenRequestAttributeHandler = new CsrfTokenRequestAttributeHandler();
+
         http.cors(corsConfig  -> corsConfig.configurationSource(new CorsConfigurationSource() {
                     @Override
                     public CorsConfiguration getCorsConfiguration(HttpServletRequest request) {
@@ -36,10 +43,19 @@ public class ProjectSecurityProdConfig {
                         return config;
                     }
                 }))
-                .sessionManagement(smc -> smc.invalidSessionUrl("/invalidSession") // 세션 만료, 유효하지 않은 세션일때 해당 페이지로 리다이렉트
-                        .maximumSessions(1).maxSessionsPreventsLogin(true).expiredUrl("/sessionExpired")) // 세션갯수 제한, PreventLogin을 true로 하면 기본 세션 유지 두번째로 로그인하는 세션 무시
+                .securityContext(contextConfig -> contextConfig.requireExplicitSave(true))
+                .sessionManagement(smc -> smc.sessionCreationPolicy(SessionCreationPolicy.ALWAYS)
+                        .sessionFixation(sfc -> sfc.changeSessionId())
+                        .invalidSessionUrl("/invalidSession") // 세션 만료, 유효하지 않은 세션일때 해당 페이지로 리다이렉트
+                        .maximumSessions(3).maxSessionsPreventsLogin(true).expiredUrl("/sessionExpired")) // 세션갯수 제한, PreventLogin을 true로 하면 기본 세션 유지 두번째로 로그인하는 세션 무시
                 .requiresChannel(rcc -> rcc.anyRequest().requiresSecure()) // Only Accept HTTPS
-                .csrf(csrfConfig -> csrfConfig.disable())
+                .csrf(csrfConfig -> csrfConfig.csrfTokenRequestHandler(csrfTokenRequestAttributeHandler)
+                        // 해당 URI는 POST 더라도 CSRF 무시
+                        .ignoringRequestMatchers("/contact", "/register")
+                        // withHttpOnlyFalse를 설정하지 않으면 JS가 쿠키 내용을 읽을 수 없다.
+                        .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()))
+                // BasicAuthenticationFilter가 실행 된 후 CsrfCookieFilter 실행
+                .addFilterAfter(new CsrfCookieFilter(), BasicAuthenticationFilter.class)
                 .authorizeHttpRequests((requests) -> requests
                 .requestMatchers("/myAccount", "/myBalance", "/myLoans", "/myCards", "/user").authenticated()
                 .requestMatchers("/contact", "/notices", "/error", "/register", "/invalidSession").permitAll());
