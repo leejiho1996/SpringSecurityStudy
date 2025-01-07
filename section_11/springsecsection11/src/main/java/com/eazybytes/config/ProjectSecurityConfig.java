@@ -2,18 +2,18 @@ package com.eazybytes.config;
 
 import com.eazybytes.exceptionhandling.CustomAccessDeniedHandler;
 import com.eazybytes.exceptionhandling.CustomBasicAuthenticationEntryPoint;
-import com.eazybytes.filter.AuthoritiesLoggingAfterFilter;
-import com.eazybytes.filter.AuthoritiesLoggingAtFilter;
-import com.eazybytes.filter.CsrfCookieFilter;
-import com.eazybytes.filter.RequestValidationBeforeFilter;
+import com.eazybytes.filter.*;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.ProviderManager;
 import org.springframework.security.authentication.password.CompromisedPasswordChecker;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
@@ -35,11 +35,10 @@ public class ProjectSecurityConfig {
     @Bean
     SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
         CsrfTokenRequestAttributeHandler csrfTokenRequestAttributeHandler = new CsrfTokenRequestAttributeHandler();
-        csrfTokenRequestAttributeHandler.setCsrfRequestAttributeName("potato");
 
         http.cors(corsConfig  -> corsConfig.configurationSource(new CorsConfigurationSourceImpl()))
                 .csrf(csrfConfig -> csrfConfig.csrfTokenRequestHandler(csrfTokenRequestAttributeHandler)
-                        .ignoringRequestMatchers("/contact", "/register")
+                        .ignoringRequestMatchers("/contact", "/register", "/apiLogin")
                         // withHttpOnlyFalse를 설정하지 않으면 JS가 쿠키 내용을 읽을 수 없다.
                         .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()))
                 // BasicAuthenticationFilter가 실행 된 후 CsrfCookieFilter 실행
@@ -47,65 +46,25 @@ public class ProjectSecurityConfig {
                 .addFilterBefore(new RequestValidationBeforeFilter(), BasicAuthenticationFilter.class)
                 .addFilterAfter(new AuthoritiesLoggingAfterFilter(), BasicAuthenticationFilter.class)
                 .addFilterAt(new AuthoritiesLoggingAtFilter(), BasicAuthenticationFilter.class)
-                .securityContext(contextConfig -> contextConfig.requireExplicitSave(false))
-                .sessionManagement(smc -> smc.sessionCreationPolicy(SessionCreationPolicy.ALWAYS))
-//                        .sessionFixation(sfc -> sfc.changeSessionId())
-//                        .invalidSessionUrl("/invalidSession")
-//                        .maximumSessions(3).maxSessionsPreventsLogin(true))
+                .addFilterAfter(new JWTTokenGeneratorFilter(), BasicAuthenticationFilter.class)
+                .addFilterBefore(new JWTTokenValidatorFilter(), BasicAuthenticationFilter.class)
+                .sessionManagement(smc -> smc.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .requiresChannel(rcc -> rcc.anyRequest().requiresInsecure()) // Only Accept HTTP
                 .authorizeHttpRequests(requests -> requests
-//                .requestMatchers("/myAccount").hasAuthority("VIEWACCOUNT")
-//                .requestMatchers("/myBalance").hasAnyAuthority("VIEWBALANCE", "VIEWACCOUNT")
-//                .requestMatchers("/myLoans").hasAuthority("VIEWLOANS")
-//                .requestMatchers("/myCards").hasAuthority("VIEWCARDS")
+
                 // ROLE_ 접두사를 안붙혀도 됨
                 .requestMatchers("/myAccount").hasRole("USER")
                 .requestMatchers("/myBalance").hasAnyRole("USER", "ADMIN")
                 .requestMatchers("/myLoans").hasRole("USER")
                 .requestMatchers("/myCards").hasRole("USER")
                 .requestMatchers("/user").authenticated()
-                .requestMatchers("/contact", "/notices", "/error", "/register", "/invalidSession").permitAll());
+                .requestMatchers("/contact", "/notices", "/error", "/register", "/invalidSession", "/apiLogin").permitAll());
         http.formLogin(withDefaults());
         // EntryPoint 설정
         http.httpBasic(hbc -> hbc.authenticationEntryPoint(new CustomBasicAuthenticationEntryPoint()));
         http.exceptionHandling(ehc -> ehc.accessDeniedHandler(new CustomAccessDeniedHandler()));
         return http.build();
     }
-
-//    final class SpaCsrfTokenRequestHandler implements CsrfTokenRequestHandler {
-//        private final CsrfTokenRequestHandler plain = new CsrfTokenRequestAttributeHandler();
-//        private final CsrfTokenRequestHandler xor = new XorCsrfTokenRequestAttributeHandler();
-//
-//        @Override
-//        public void handle(HttpServletRequest request, HttpServletResponse response, Supplier<CsrfToken> csrfToken) {
-//            /*
-//             * Always use XorCsrfTokenRequestAttributeHandler to provide BREACH protection of
-//             * the CsrfToken when it is rendered in the response body.
-//             */
-//            this.xor.handle(request, response, csrfToken);
-//            /*
-//             * Render the token value to a cookie by causing the deferred token to be loaded.
-//             */
-//            csrfToken.get();
-//        }
-//
-//        @Override
-//        public String resolveCsrfTokenValue(HttpServletRequest request, CsrfToken csrfToken) {
-//            String headerValue = request.getHeader(csrfToken.getHeaderName());
-//            /*
-//             * If the request contains a request header, use CsrfTokenRequestAttributeHandler
-//             * to resolve the CsrfToken. This applies when a single-page application includes
-//             * the header value automatically, which was obtained via a cookie containing the
-//             * raw CsrfToken.
-//             *
-//             * In all other cases (e.g. if the request contains a request parameter), use
-//             * XorCsrfTokenRequestAttributeHandler to resolve the CsrfToken. This applies
-//             * when a server-side rendered form includes the _csrf request parameter as a
-//             * hidden input.
-//             */
-//            return (StringUtils.hasText(headerValue) ? this.plain : this.xor).resolveCsrfTokenValue(request, csrfToken);
-//        }
-//    }
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -120,5 +79,18 @@ public class ProjectSecurityConfig {
     @Bean
     public CompromisedPasswordChecker compromisedPasswordChecker() {
         return new HaveIBeenPwnedRestApiPasswordChecker();
+    }
+
+    @Bean
+    public AuthenticationManager authenticationManager(UserDetailsService userDetailsService,
+                                                       PasswordEncoder passwordEncoder) {
+
+        EazyBankUsernamePwdAuthenticationProvider authenticationProvider =
+                new EazyBankUsernamePwdAuthenticationProvider(userDetailsService, passwordEncoder);
+
+        ProviderManager providerManager = new ProviderManager(authenticationProvider);
+        providerManager.setEraseCredentialsAfterAuthentication(false); // Authentication 객체 내부의 비밀번호를 지우지 않음
+
+        return providerManager;
     }
 }
