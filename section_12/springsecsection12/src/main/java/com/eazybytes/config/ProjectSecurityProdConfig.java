@@ -72,7 +72,7 @@ public class ProjectSecurityProdConfig {
                         // ROLE_ 접두사를 안붙혀도 됨
                         .requestMatchers("/myAccount").hasRole("USER")
                         .requestMatchers("/myBalance").hasAnyRole("USER", "ADMIN")
-                        .requestMatchers("/myLoans").hasRole("USER")
+                        .requestMatchers("/myLoans").authenticated()
                         .requestMatchers("/myCards").hasRole("USER")
                         .requestMatchers("/user").authenticated()
                 .requestMatchers("/contact", "/notices", "/error", "/register", "/invalidSession").permitAll());
