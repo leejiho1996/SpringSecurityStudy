@@ -15,6 +15,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.password.HaveIBeenPwnedRestApiPasswordChecker;
 import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
@@ -33,6 +34,9 @@ public class ProjectSecurityProdConfig {
     @Bean
     SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
         CsrfTokenRequestAttributeHandler csrfTokenRequestAttributeHandler = new CsrfTokenRequestAttributeHandler();
+        // Jwt Converter 설정
+        JwtAuthenticationConverter jwtAuthenticationConverter = new JwtAuthenticationConverter();
+        jwtAuthenticationConverter.setJwtGrantedAuthoritiesConverter(new KeyCloakRoleConverter());
 
         http.cors(corsConfig  -> corsConfig.configurationSource(new CorsConfigurationSource() {
                     @Override
@@ -59,56 +63,19 @@ public class ProjectSecurityProdConfig {
                         .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()))
                 // BasicAuthenticationFilter가 실행 된 후 CsrfCookieFilter 실행
                 .addFilterAfter(new CsrfCookieFilter(), BasicAuthenticationFilter.class)
-                .addFilterBefore(new RequestValidationBeforeFilter(), BasicAuthenticationFilter.class)
-                .addFilterAfter(new AuthoritiesLoggingAfterFilter(), BasicAuthenticationFilter.class)
-                .addFilterAt(new AuthoritiesLoggingAtFilter(), BasicAuthenticationFilter.class)
-                .addFilterAfter(new JWTTokenGeneratorFilter(), BasicAuthenticationFilter.class)
-                .addFilterBefore(new JWTTokenValidatorFilter(), BasicAuthenticationFilter.class)
                 .authorizeHttpRequests((requests) -> requests
                         .requestMatchers("/myAccount").hasAuthority("VIEWACCOUNT")
-//                .requestMatchers("/myBalance").hasAnyAuthority("VIEWBALANCE", "VIEWACCOUNT")
-//                .requestMatchers("/myLoans").hasAuthority("VIEWLOANS")
-//                .requestMatchers("/myCards").hasAuthority("VIEWCARDS")
-                        // ROLE_ 접두사를 안붙혀도 됨
                         .requestMatchers("/myAccount").hasRole("USER")
                         .requestMatchers("/myBalance").hasAnyRole("USER", "ADMIN")
                         .requestMatchers("/myLoans").authenticated()
                         .requestMatchers("/myCards").hasRole("USER")
                         .requestMatchers("/user").authenticated()
-                .requestMatchers("/contact", "/notices", "/error", "/register", "/invalidSession").permitAll());
-        http.formLogin(withDefaults());
-        // EntryPoint 설정
-        http.httpBasic(hbc -> hbc.authenticationEntryPoint(new CustomBasicAuthenticationEntryPoint()));
-        // 전역 EntryPoint 설정 (로그인 흐름 httpBasic 이외에도 다른 곳에서 발생할 수 있는 오류 처리)
-        // http.exceptionHandling(ehc -> ehc.authenticationEntryPoint(new CustomBasicAuthenticationEntryPoint()));
-
-        // AccessDeniedHandler 설정. 자체 UI를 제공하는 상황에서는 .accessDeniedPage("/page") 처럼 설정
+                .requestMatchers("/contact", "/notices", "/error").permitAll());
+        http.oauth2ResourceServer(rsc -> rsc.jwt(jwtConfigurer ->
+                jwtConfigurer.jwtAuthenticationConverter(jwtAuthenticationConverter)));
         http.exceptionHandling(ehc -> ehc.accessDeniedHandler(new CustomAccessDeniedHandler()));
         return http.build();
     }
 
-    @Bean
-    public PasswordEncoder passwordEncoder() {
-        // createDelegatingPasswordEncoder를 사용하면 알맞게 비밀번호를 인코딩해서 제공해줌
-        return PasswordEncoderFactories.createDelegatingPasswordEncoder();
-    }
 
-    /**
-     * SpringSecurity 6.3 부터 도입
-     * 안전한 비밀번호인지 체크
-     */
-    @Bean
-    public CompromisedPasswordChecker compromisedPasswordChecker() {
-        return new HaveIBeenPwnedRestApiPasswordChecker();
-    }
-
-    @Bean
-    public AuthenticationManager authenticationManager(UserDetailsService userDetailsService,
-                                                       PasswordEncoder passwordEncoder) {
-        EazyBankProdUsernamePwdAuthenticationProvider authenticationProvider =
-                new EazyBankProdUsernamePwdAuthenticationProvider(userDetailsService, passwordEncoder);
-        ProviderManager providerManager = new ProviderManager(authenticationProvider);
-        providerManager.setEraseCredentialsAfterAuthentication(false);
-        return  providerManager;
-    }
 }

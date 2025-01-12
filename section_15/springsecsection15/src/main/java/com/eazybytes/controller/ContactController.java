@@ -21,18 +21,17 @@ public class ContactController {
     private final ContactRepository contactRepository;
 
     @PostMapping("/contact")
-//    @PreFilter("filterObject.contactName != 'Test'")
+    // @PreFilter("filterObject.contactName != 'Test'")
     @PostFilter("filterObject.contactName != 'Test'")
     public List<Contact> saveContactInquiryDetails(@RequestBody List<Contact> contacts) {
         List<Contact> returnContacts = new ArrayList<>();
-        if (!contacts.isEmpty()) {
+        if(!contacts.isEmpty()) {
             Contact contact = contacts.getFirst();
             contact.setContactId(getServiceReqNumber());
             contact.setCreateDt(new Date(System.currentTimeMillis()));
             Contact savedContact = contactRepository.save(contact);
             returnContacts.add(savedContact);
         }
-
         return returnContacts;
     }
 
